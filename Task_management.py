@@ -31,18 +31,59 @@ except Exception as e:
 
 # Load spaCy model
 try:
-    nlp = spacy.load("en_core_web_md")
+    nlp = spacy.load("en_core_web_sm")
 except OSError:
     print("Downloading spaCy model...")
     import subprocess
     import sys
-    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_md"])
-    nlp = spacy.load("en_core_web_md")
+    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_sm"])
+    nlp = spacy.load("en_core_web_sm")
 
 # Define states for conversation handling
 class BotStates(StatesGroup):
     waiting_for_task_choice = State()
     waiting_for_confirmation = State()
+
+# Helper Functions
+def is_completion_indicator(text: str) -> bool:
+    """Check if the message indicates task completion."""
+    completion_phrases = [
+        'completed',
+        'done',
+        'finished',
+        'complete',
+        'did',
+        'accomplished',
+        'achieved',
+        'concluded'
+    ]
+    text = text.lower()
+    return any(phrase in text for phrase in completion_phrases)
+
+def extract_task_description(text: str) -> str:
+    """Extract task description from completion message."""
+    completion_phrases = [
+        'completed',
+        'done',
+        'finished',
+        'complete',
+        'did',
+        'accomplished',
+        'achieved',
+        'concluded'
+    ]
+    text = text.lower()
+    for phrase in completion_phrases:
+        text = text.replace(phrase, '')
+    return text.strip()
+
+def find_matching_tasks(tasks: List[Dict[str, Any]], description: str) -> List[Dict[str, Any]]:
+    """Find tasks that match the given description."""
+    description = description.lower()
+    return [
+        task for task in tasks
+        if description in task['Task_name'].lower()
+    ]
 
 # Keep the existing TaskParser class and other helper functions...
 # [Previous code remains the same until the interactive_query function]
