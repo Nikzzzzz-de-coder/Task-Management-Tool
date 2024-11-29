@@ -1,4 +1,5 @@
 import logging
+import os
 from telegram import Update, ForceReply
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 from Task_management import (
@@ -10,15 +11,14 @@ from Task_management import (
     mark_task_completed,
     is_completion_indicator,
     handle_task_completion,
-    interactive_query,
+    format_task_results,
+    TaskParser,
 )
 
-import os
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
-
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
 # Enable logging
 logging.basicConfig(
@@ -26,6 +26,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Get the Telegram bot token from environment variables
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
