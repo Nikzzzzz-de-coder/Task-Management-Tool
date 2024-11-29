@@ -85,51 +85,163 @@ def find_matching_tasks(tasks: List[Dict[str, Any]], description: str) -> List[D
         if description in task['Task_name'].lower()
     ]
 
-# Keep the existing TaskParser class and other helper functions...
-# [Previous code remains the same until the interactive_query function]
-
-@bot.message_handler(commands=['start', 'help'])
-def send_welcome(message):
-    """Handle /start and /help commands"""
-    welcome_text = """
-Hello! I'm your Task Management bot. Here's what you can do:
-
-- Add tasks: "I need to complete project by tomorrow"
-- View tasks: "Show all my tasks" or "What's due this week?"
-- Complete tasks: "I've completed the python assignment"
-- Delete tasks: "Delete math homework"
-
-Try any of these commands or ask for help!
-"""
-    bot.reply_to(message, welcome_text)
-
-@bot.message_handler(func=lambda message: True)
-def handle_all_messages(message):
-    """Handle all incoming messages"""
+def handle_common_queries(query: str) -> List[Dict[str, Any]]:
+    """Handle common task queries"""
     try:
-        query = message.text.strip()
-        chat_id = message.chat.id
+        # Get all tasks from database
+        tasks = supabase.table("Task Data").select("*").execute().data
         
-        if is_completion_indicator(query):
-            # Handle task completion/deletion
-            handle_telegram_completion(message)
-        elif query.lower().startswith('delete'):
-            # Handle explicit deletion
-            handle_telegram_deletion(message)
-        elif any(indicator in query.lower() for indicator in TaskParser().task_indicators):
-            # Handle task addition
-            handle_telegram_task_addition(message)
-        else:
-            # Handle viewing queries
-            results = handle_common_queries(query)
-            if results:
-                format_telegram_results(message, results)
-            else:
-                bot.reply_to(message, "No results to display.")
+        query = query.lower()
+        current_date = datetime.now()
+        
+        # Filter tasks based on query
+        if 'due today' in query or "today's tasks" in query:
+            return [
+                task for task in tasks
+                if datetime.fromisoformat(task['Deadline']).date() == current_date.date()
+            ]
             
+        elif 'due this week' in query or 'this week' in query:
+            week_end = current_date + timedelta(days=7)
+            return [
+                task for task in tasks
+                if current_date.date() <= datetime.fromisoformat(task['Deadline']).date() <= week_end.date()
+            ]
+            
+        elif 'all' in query or 'list' in query:
+            return tasks
+            
+        elif 'overdue' in query:
+            return [
+                task for task in tasks
+                if datetime.fromisoformat(task['Deadline']).date() < current_date.date()
+            ]
+            
+        return tasks  # Default to showing all tasks
+        
     except Exception as e:
-        bot.reply_to(message, f"Error: {str(e)}\nPlease try again.")
+        print(f"Error handling query: {str(e)}")
+        return []
 
+def format_telegram_results(message, tasks: List[Dict[str, Any]]):
+    """Format and send task results for Telegram"""
+    if not tasks:
+        bot.reply_to(message, "No tasks found.")
+        return
+
+    sorted_tasks = sorted(tasks, key=lambda x: datetime.fromisoformat(x['Deadline']))
+    current_date = datetime.now()
+
+    result_text = "*Your Tasks:*\n\n"
+    for task in sorted_tasks:
+        deadline = datetime.fromisoformat(task['Deadline'])
+        days_until = (deadline.date() - current_date.date()).days
+
+        if days_until < 0:
+            days_str = f"{abs(days_until)} days overdue"
+        elif days_until == 0:
+            days_str = "Due today"
+        else:
+            days_str = f"{days_until} day{'s' if days_until > 1 else ''} left"
+
+        status = task.get('Status', 'To Do')
+        
+        result_text += (f"• *{task['Task_name']}*\n"
+                       f"  Due: {deadline.strftime('%Y-%m-%d %H:%M')}\n"
+                       f"  Difficulty: {task['difficulty']}\n"
+                       f"  Status: {status}\n"
+                       f"  {days_str}\n\n")
+
+    # Split long messages if needed (Telegram has a 4096 character limit)
+    if len(result_text) > 4000:
+        chunks = [result_text[i:i+4000] for i in range(0, len(result_text), 4000)]
+        for chunk in chunks:
+            bot.reply_to(message, chunk, parse_mode='Markdown')
+    else:
+        bot.reply_to(message, result_text, parse_mode='Markdown')
+
+# TaskParser Class
+class TaskParser:
+    """Class to parse task details from user messages."""
+    
+    def __init__(self):
+        self.cal = parsedatetime.Calendar()
+        self.task_indicators = [
+            'need to',
+            'have to',
+            'must',
+            'should',
+            'want to',
+            'going to',
+            'gotta',
+            'got to',
+            'due'
+        ]
+
+    def extract_task_details(self, text: str) -> Optional[Dict[str, Any]]:
+        """Extract task name and deadline from text."""
+        try:
+            # Extract deadline
+            time_struct, parse_status = self.cal.parse(text)
+            if parse_status == 0:
+                return None
+            
+            deadline = datetime(*time_struct[:6])
+            
+            # Extract task name
+            doc = nlp(text)
+            task_name = None
+            
+            # Look for task indicators
+            for indicator in self.task_indicators:
+                if indicator in text.lower():
+                    # Split by indicator and take the latter part
+                    parts = text.lower().split(indicator, 1)
+                    if len(parts) > 1:
+                        task_text = parts[1]
+                        # Clean up the task text
+                        task_name = task_text.split('by')[0].strip()
+                        task_name = task_name.split('until')[0].strip()
+                        task_name = task_name.split('before')[0].strip()
+                        break
+            
+            if not task_name:
+                return None
+                
+            # Determine difficulty based on text analysis
+            difficulty = self.determine_difficulty(text)
+            
+            return {
+                'Task_name': task_name.capitalize(),
+                'Deadline': deadline.isoformat(),
+                'Status': 'To Do',
+                'difficulty': difficulty
+            }
+            
+        except Exception as e:
+            print(f"Error parsing task: {str(e)}")
+            return None
+
+    def determine_difficulty(self, text: str) -> str:
+        """Determine task difficulty based on text analysis."""
+        # Keywords indicating difficulty
+        difficulty_indicators = {
+            'Easy': ['simple', 'easy', 'quick', 'basic'],
+            'Hard': ['difficult', 'hard', 'complex', 'challenging'],
+            'Medium': ['moderate', 'medium']
+        }
+        
+        text = text.lower()
+        
+        # Check for explicit difficulty indicators
+        for difficulty, indicators in difficulty_indicators.items():
+            if any(indicator in text for indicator in indicators):
+                return difficulty
+        
+        # Default to Medium if no indicators found
+        return 'Medium'
+
+# Existing TaskParser Related Code
 def handle_telegram_completion(message):
     """Handle task completion for Telegram"""
     try:
@@ -261,42 +373,47 @@ def handle_telegram_task_addition(message):
     except Exception as e:
         bot.reply_to(message, "Oops, something went wrong! Could you try saying that in a different way?")
 
-def format_telegram_results(message, tasks: List[Dict[str, Any]]):
-    """Format and send task results for Telegram"""
-    if not tasks:
-        bot.reply_to(message, "No tasks found.")
-        return
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    """Handle /start and /help commands"""
+    welcome_text = """
+Hello! I'm your Task Management bot. Here's what you can do:
 
-    sorted_tasks = sorted(tasks, key=lambda x: datetime.fromisoformat(x['Deadline']))
-    current_date = datetime.now()
+- Add tasks: "I need to complete project by tomorrow"
+- View tasks: "Show all my tasks" or "What's due this week?"
+- Complete tasks: "I've completed the python assignment"
+- Delete tasks: "Delete math homework"
 
-    result_text = "*Your Tasks:*\n\n"
-    for task in sorted_tasks:
-        deadline = datetime.fromisoformat(task['Deadline'])
-        days_until = (deadline.date() - current_date.date()).days
+Try any of these commands or ask for help!
+"""
+    bot.reply_to(message, welcome_text)
 
-        if days_until < 0:
-            days_str = f"{abs(days_until)} days overdue"
-        elif days_until == 0:
-            days_str = "Due today"
-        else:
-            days_str = f"{days_until} day{'s' if days_until > 1 else ''} left"
-
-        status = task.get('Status', 'To Do')
+@bot.message_handler(func=lambda message: True)
+def handle_all_messages(message):
+    """Handle all incoming messages"""
+    try:
+        query = message.text.strip()
+        chat_id = message.chat.id
         
-        result_text += (f"• *{task['Task_name']}*\n"
-                       f"  Due: {deadline.strftime('%Y-%m-%d %H:%M')}\n"
-                       f"  Difficulty: {task['difficulty']}\n"
-                       f"  Status: {status}\n"
-                       f"  {days_str}\n\n")
-
-    # Split long messages if needed (Telegram has a 4096 character limit)
-    if len(result_text) > 4000:
-        chunks = [result_text[i:i+4000] for i in range(0, len(result_text), 4000)]
-        for chunk in chunks:
-            bot.reply_to(message, chunk, parse_mode='Markdown')
-    else:
-        bot.reply_to(message, result_text, parse_mode='Markdown')
+        if is_completion_indicator(query):
+            # Handle task completion/deletion
+            handle_telegram_completion(message)
+        elif query.lower().startswith('delete'):
+            # Handle explicit deletion
+            handle_telegram_deletion(message)
+        elif any(indicator in query.lower() for indicator in TaskParser().task_indicators):
+            # Handle task addition
+            handle_telegram_task_addition(message)
+        else:
+            # Handle viewing queries
+            results = handle_common_queries(query)
+            if results:
+                format_telegram_results(message, results)
+            else:
+                bot.reply_to(message, "No results to display.")
+            
+    except Exception as e:
+        bot.reply_to(message, f"Error: {str(e)}\nPlease try again.")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith(('complete_', 'delete_')))
 def handle_task_callback(call):
