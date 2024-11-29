@@ -396,16 +396,12 @@ def handle_all_messages(message):
         chat_id = message.chat.id
         
         if is_completion_indicator(query):
-            # Handle task completion/deletion
             handle_telegram_completion(message)
         elif query.lower().startswith('delete'):
-            # Handle explicit deletion
             handle_telegram_deletion(message)
         elif any(indicator in query.lower() for indicator in TaskParser().task_indicators):
-            # Handle task addition
             handle_telegram_task_addition(message)
         else:
-            # Handle viewing queries
             results = handle_common_queries(query)
             if results:
                 format_telegram_results(message, results)
