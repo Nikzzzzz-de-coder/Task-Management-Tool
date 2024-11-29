@@ -1,7 +1,6 @@
 python-telegram-bot
 pyTelegramBotAPI
 spacy
-en-core-web-md
 parsedatetime
 supabase
 python-dotenv
