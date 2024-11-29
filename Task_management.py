@@ -31,13 +31,13 @@ except Exception as e:
 
 # Load spaCy model
 try:
-    nlp = spacy.load("en_core_web_sm")
+    nlp = spacy.load("en_core_web_md")
 except OSError:
     print("Downloading spaCy model...")
     import subprocess
     import sys
-    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_lg"])
-    nlp = spacy.load("en_core_web_lg")
+    subprocess.check_call([sys.executable, "-m", "spacy", "download", "en_core_web_md"])
+    nlp = spacy.load("en_core_web_md")
 
 # Define states for conversation handling
 class BotStates(StatesGroup):
